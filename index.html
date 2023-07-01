@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screen share</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.1/socket.io.js" integrity="sha512-Z6C1p1NIexPj5MsVUunW4pg7uMX6/TT3CUVldmjXx2kpip1eZcrAnxIusDxyFIikyM9A61zOVNgvLr/TGudOQg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+<body>
+
+    <video id="my-screen" muted controls></video>
+    <button id="share">Share screen</button>
+    <script>
+        const socket = io('/');
+        let localStream = new MediaStream();
+        let remoteStream = new MediaStream();
+
+        let peer = null;
+
+        const servers = {
+            "iceServers": [
+                {
+                    urls: [
+                        'stun:stun1.l.google.com:19302',
+                        'stun:stun2.l.google.com:19302'
+                    ]
+                }
+            ],
+            iceCandidatePoolSize: 5
+        }
+
+        document.getElementById('share').onclick = async e => {
+            localStream = await navigator.mediaDevices.getDisplayMedia({
+                audio: false,
+                video: true
+            });
+
+            peer = new RTCPeerConnection(servers);
+
+            setVideo('my-screen', localStream);
+
+            localStream.getTracks().forEach(track => {
+                peer.addTrack(track, localStream);
+            })
+
+            peer.onicecandidate = e => {
+                if(e.candidate) {
+                    console.log(e.candidate);
+                    socket.emit('offer', {
+                        offerDescription,
+                        candidate: e.candidate
+                    });
+                }
+            }
+
+            const offerDescription = await peer.createOffer();
+            peer.setLocalDescription(offerDescription);
+        }
+
+        socket.on('offer', async ({offerDescription, candidate}) => {
+            console.log(offerDescription);
+            peer = new RTCPeerConnection(servers);
+
+            localStream.getTracks().forEach(track => {
+                peer.addTrack(track, localStream);
+            })
+
+            peer.onicecandidate = e => {
+                if(e.candidate) {
+                    socket.emit('answer', {
+                        answerDescription,
+                        candidate: e.candidate
+                    });
+                }
+            }
+
+            
+            peer.ontrack = e => {
+                console.log("here");
+                setVideo('my-screen', e.streams[0]);
+                console.log(e.streams);
+            }
+
+            await peer.setRemoteDescription(offerDescription);
+            peer.addIceCandidate(candidate);
+            
+            const answerDescription = await peer.createAnswer();
+            peer.setLocalDescription(answerDescription);
+        })
+
+        socket.on('answer', async ({answerDescription, candidate}) => {
+            console.log(answerDescription, candidate);
+            await peer.setRemoteDescription(answerDescription);
+            peer.addIceCandidate(candidate);
+        })
+
+        function setVideo(id, stream) {
+            const v = document.getElementById(id);
+            v.srcObject = stream;
+
+            v.addEventListener('loadedmetadata', () => {
+                v.play();
+            })
+        }
+    </script>
+</body>
+</html>
